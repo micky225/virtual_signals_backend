@@ -41,23 +41,31 @@ NEXT_PUBLIC_OPEN_ACCESS=false
 
 1. Set the Vercel **Root Directory** to `frontend`.
 2. Add environment variables:
-   - `NEXT_PUBLIC_API_URL` — your live Django URL, e.g. `https://api.example.com`
-   - `NEXT_PUBLIC_OPEN_ACCESS` — keep `false` so access waits for admin approval
-3. Deploy.
+   - `NEXT_PUBLIC_API_URL=https://virtual-signals-backend.onrender.com`
+   - `NEXT_PUBLIC_OPEN_ACCESS=false`
+3. Deploy. Live site: https://virtual-signals-frontend.vercel.app
 
 ## Deploy backend (Railway or Render)
 
-1. Set the service **root directory** to `backend`.
-2. Add environment variables:
+1. Set the service **root directory** to `backend` (skip this if the Git repo is only the backend folder).
+2. Set **Start Command** to:
+
+```
+gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+```
+
+Do not use `gunicorn backend:app`. There is no `backend` Python module; the WSGI app is `config.wsgi:application`.
+3. Add environment variables:
    - `DJANGO_SECRET_KEY` — a long random string
    - `DJANGO_DEBUG=false`
-   - `ALLOWED_HOSTS` — your API hostname
-   - `FRONTEND_ORIGIN` — your Vercel URL, e.g. `https://your-app.vercel.app`
-   - `CORS_ALLOWED_ORIGINS` — same as `FRONTEND_ORIGIN`
+   - `ALLOWED_HOSTS=virtual-signals-backend.onrender.com`
+   - `FRONTEND_ORIGIN=https://virtual-signals-frontend.vercel.app`
+   - `CORS_ALLOWED_ORIGINS=https://virtual-signals-frontend.vercel.app`
    - `GEMINI_API_KEY`
    - `OPEN_ACCESS=false` — users wait for admin payment confirmation
    - `DATABASE_URL` — Postgres URL from the host (recommended). SQLite is local-only.
-3. The `Procfile` runs migrate, collectstatic, and gunicorn.
+
+Live API: https://virtual-signals-backend.onrender.com
 
 After both are live, the browser talks to Django directly. CORS will fail until `FRONTEND_ORIGIN` matches the exact Vercel origin (including `https://`).
 

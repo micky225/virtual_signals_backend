@@ -18,11 +18,26 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'true').lower() == 'true'
 if not DEBUG and SECRET_KEY.startswith('django-insecure-'):
     raise ValueError('Set DJANGO_SECRET_KEY before deploying with DJANGO_DEBUG=false.')
 
-ALLOWED_HOSTS = csv_env('ALLOWED_HOSTS', 'localhost,127.0.0.1')
-for extra in ('RAILWAY_PUBLIC_DOMAIN', 'RENDER_EXTERNAL_HOSTNAME'):
-    host = os.getenv(extra, '').strip()
-    if host and host not in ALLOWED_HOSTS:
-        ALLOWED_HOSTS.append(host)
+PRODUCTION_FRONTEND = 'https://virtual-signals-frontend.vercel.app'
+PRODUCTION_API_HOST = 'virtual-signals-backend.onrender.com'
+PRODUCTION_API = f'https://{PRODUCTION_API_HOST}'
+
+
+def merge_unique(*groups):
+    seen = []
+    for group in groups:
+        for item in group:
+            value = (item or '').strip().rstrip('/')
+            if value and value not in seen:
+                seen.append(value)
+    return seen
+
+
+ALLOWED_HOSTS = merge_unique(
+    csv_env('ALLOWED_HOSTS', 'localhost,127.0.0.1'),
+    [PRODUCTION_API_HOST],
+    [os.getenv('RAILWAY_PUBLIC_DOMAIN', ''), os.getenv('RENDER_EXTERNAL_HOSTNAME', '')],
+)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -103,13 +118,20 @@ STORAGES = {
     },
 }
 
-FRONTEND_ORIGIN = os.getenv('FRONTEND_ORIGIN', 'http://localhost:3000').rstrip('/')
-CORS_ALLOWED_ORIGINS = csv_env(
-    'CORS_ALLOWED_ORIGINS',
-    ','.join(dict.fromkeys([FRONTEND_ORIGIN, 'http://localhost:3000', 'http://127.0.0.1:3000'])),
+FRONTEND_ORIGIN = os.getenv(
+    'FRONTEND_ORIGIN',
+    'http://localhost:3000' if DEBUG else PRODUCTION_FRONTEND,
+).rstrip('/')
+CORS_ALLOWED_ORIGINS = merge_unique(
+    csv_env('CORS_ALLOWED_ORIGINS'),
+    [FRONTEND_ORIGIN, PRODUCTION_FRONTEND, 'http://localhost:3000', 'http://127.0.0.1:3000'],
 )
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = csv_env('CSRF_TRUSTED_ORIGINS', ','.join(CORS_ALLOWED_ORIGINS))
+CSRF_TRUSTED_ORIGINS = merge_unique(
+    csv_env('CSRF_TRUSTED_ORIGINS'),
+    CORS_ALLOWED_ORIGINS,
+    [PRODUCTION_API],
+)
 
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
