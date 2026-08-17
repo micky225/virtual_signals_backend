@@ -82,16 +82,31 @@ TEMPLATES = [
     },
 ]
 
+import re
+
 DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
 if DATABASE_URL:
-    import dj_database_url
-    DATABASES = {
-        'default': dj_database_url.parse(
+    if os.getenv('RENDER'):
+        DATABASE_URL = re.sub(r'@(dpg-[a-z0-9-]+)\.[^/]+', r'@\1', DATABASE_URL)
+    else:
+        DATABASE_URL = re.sub(
+            r'@(dpg-[a-z0-9-]+)(?=[/?])',
+            r'@\1.oregon-postgres.render.com',
             DATABASE_URL,
-            conn_max_age=600,
-            ssl_require='localhost' not in DATABASE_URL and '127.0.0.1' not in DATABASE_URL,
         )
+
+if DATABASE_URL:
+    import dj_database_url
+    if 'sslmode=' not in DATABASE_URL and 'localhost' not in DATABASE_URL and '127.0.0.1' not in DATABASE_URL:
+        DATABASE_URL += ('&' if '?' in DATABASE_URL else '?') + 'sslmode=require'
+    DATABASES = {
+        'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600, ssl_require=True)
     }
+elif os.getenv('RENDER') or not DEBUG:
+    raise ValueError(
+        'DATABASE_URL is required on Render. Set it to the Internal Postgres URL '
+        '(host like dpg-xxxxx-a, not SQLite).'
+    )
 else:
     DATABASES = {
         'default': {
