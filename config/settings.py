@@ -85,7 +85,13 @@ TEMPLATES = [
 DATABASE_URL = os.getenv('DATABASE_URL', '').strip()
 if DATABASE_URL:
     import dj_database_url
-    DATABASES = {'default': dj_database_url.parse(DATABASE_URL, conn_max_age=600)}
+    DATABASES = {
+        'default': dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            ssl_require='localhost' not in DATABASE_URL and '127.0.0.1' not in DATABASE_URL,
+        )
+    }
 else:
     DATABASES = {
         'default': {
