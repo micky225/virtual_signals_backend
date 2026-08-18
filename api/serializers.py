@@ -50,3 +50,48 @@ class PredictionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Prediction
         fields = ('id', 'game', 'cost', 'payload', 'created_at')
+
+
+class AdminPaymentSerializer(serializers.ModelSerializer):
+    userName = serializers.CharField(source='user.first_name', read_only=True)
+    userEmail = serializers.EmailField(source='user.email', read_only=True)
+    userPhone = serializers.SerializerMethodField()
+    diamonds = serializers.SerializerMethodField()
+    registrationApproved = serializers.SerializerMethodField()
+    footballUnlocked = serializers.SerializerMethodField()
+    bottleUnlocked = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Payment
+        fields = (
+            'id', 'kind', 'country', 'amount', 'transaction_id', 'sender_name',
+            'paid_from', 'status', 'admin_note', 'created_at',
+            'userName', 'userEmail', 'userPhone', 'diamonds',
+            'registrationApproved', 'footballUnlocked', 'bottleUnlocked',
+        )
+
+    def _profile(self, obj):
+        try:
+            return obj.user.profile
+        except Profile.DoesNotExist:
+            return None
+
+    def get_userPhone(self, obj):
+        profile = self._profile(obj)
+        return profile.phone if profile else ''
+
+    def get_diamonds(self, obj):
+        profile = self._profile(obj)
+        return profile.diamonds if profile else 0
+
+    def get_registrationApproved(self, obj):
+        profile = self._profile(obj)
+        return bool(profile and profile.registration_approved)
+
+    def get_footballUnlocked(self, obj):
+        profile = self._profile(obj)
+        return bool(profile and profile.football_unlocked)
+
+    def get_bottleUnlocked(self, obj):
+        profile = self._profile(obj)
+        return bool(profile and profile.bottle_unlocked)
