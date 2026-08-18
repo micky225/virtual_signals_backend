@@ -51,6 +51,9 @@ class Payment(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'status'], name='api_pay_user_status_idx'),
+        ]
 
     def __str__(self):
         return f'{self.user.email} · {self.kind} · {self.status}'
@@ -96,6 +99,9 @@ class Prediction(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'game'], name='api_pred_user_game_idx'),
+        ]
 
     def __str__(self):
         return f'{self.user.email} · {self.game} · {self.created_at:%Y-%m-%d %H:%M}'

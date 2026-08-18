@@ -32,20 +32,21 @@ def prepare_image(raw_bytes):
         image = image.convert('RGB')
     elif image.mode != 'RGB':
         image = image.convert('RGB')
-    image.thumbnail((1280, 1280))
+    image.thumbnail((1024, 1024))
     buffer = BytesIO()
-    image.save(buffer, format='JPEG', quality=72, optimize=True)
+    image.save(buffer, format='JPEG', quality=68, optimize=True)
     return base64.b64encode(buffer.getvalue()).decode(), 'image/jpeg'
 
 
 def _football_prompt():
     return '''You are a virtual football analyst. The image is a SportyBet Instant Football / VGames ticket screenshot.
-Read every visible fixture. For each match return a 1X2 pick.
+Scan the visible fixtures, then return ONLY the 2 or 3 strongest 1X2 picks. Never return every match.
 Rules:
+- Choose the 2-3 highest-confidence fixtures only. Prefer 3 if at least 3 matches are visible, otherwise 2.
 - Use the exact team names from the screenshot.
 - pick must be "{Home or Away team} Win" or "Draw".
 - confidence is 55-92. Shorter odds / stronger implied probability = higher confidence.
-- Only include matches you can actually see.
+- Rank the returned picks from highest confidence to lowest.
 - Entertainment analysis only, not financial advice.
 Return JSON only: {"predictions":[{"home":"Burnley","away":"Liverpool","pick":"Liverpool Win","confidence":82}]}'''
 
@@ -64,17 +65,20 @@ Return JSON only: {"predictions":[{"round":"Round 1","pick":"UP","confidence":78
 
 def _normalize_football(rows):
     picks = []
+    seen = set()
     for item in rows or []:
         if not isinstance(item, dict):
             continue
         home = str(item.get('home') or '').strip()
         away = str(item.get('away') or '').strip()
         pick = str(item.get('pick') or '').strip()
-        if home and away and pick:
+        key = (home.lower(), away.lower())
+        if home and away and pick and key not in seen:
+            seen.add(key)
             picks.append({'home': home, 'away': away, 'pick': pick, 'confidence': _clamp(item.get('confidence'))})
-        if len(picks) >= 8:
-            break
-    return picks
+    picks.sort(key=lambda item: item['confidence'], reverse=True)
+    limit = 3 if len(picks) >= 3 else 2
+    return picks[:limit] if picks else []
 
 
 def _normalize_bottle(rows):
@@ -140,7 +144,7 @@ def _gemini(image_b64, mime, game):
     if not key:
         raise ValueError('missing')
     models = []
-    for name in (settings.GEMINI_MODEL, 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite', 'gemini-flash-latest'):
+    for name in (settings.GEMINI_MODEL, 'gemini-flash-lite-latest'):
         if name and name not in models:
             models.append(name)
     last_error = 'Gemini request failed.'

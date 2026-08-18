@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.db.models import F
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes, parser_classes
@@ -16,11 +17,20 @@ AMOUNTS = {
     'other': 'Telegram',
 }
 
+ALLOWED_IMAGE_TYPES = {'image/jpeg', 'image/jpg', 'image/png', 'image/webp'}
+
+
+def _get_profile(user):
+    try:
+        return user.profile
+    except Profile.DoesNotExist:
+        return Profile.objects.create(user=user)
+
 
 def _profile(user):
-    profile, _ = Profile.objects.get_or_create(user=user)
+    profile = _get_profile(user)
     pending = list(
-        Payment.objects.filter(user=user, status='pending').values('id', 'kind', 'status', 'created_at')
+        Payment.objects.filter(user=user, status='pending').values('id', 'kind', 'status', 'created_at')[:8]
     )
     return {
         'name': user.first_name or user.username,
@@ -58,7 +68,7 @@ def login(request):
     email = serializer.validated_data['email'].lower().strip()
     password = serializer.validated_data['password']
     try:
-        user = User.objects.get(email__iexact=email)
+        user = User.objects.select_related('profile').get(email__iexact=email)
     except User.DoesNotExist:
         return Response({'error': 'Invalid email or password.'}, status=400)
     if not user.check_password(password):
@@ -83,13 +93,16 @@ def me(request):
 @parser_classes([MultiPartParser, FormParser, JSONParser])
 def payments(request):
     user = request.user
-    profile, _ = Profile.objects.get_or_create(user=user)
+    profile = _get_profile(user)
     if request.method == 'GET':
         kind = request.query_params.get('kind')
-        queryset = Payment.objects.filter(user=user)
+        queryset = Payment.objects.filter(user=user).only(
+            'id', 'kind', 'country', 'amount', 'transaction_id', 'sender_name',
+            'paid_from', 'screenshot', 'status', 'admin_note', 'created_at',
+        )
         if kind:
             queryset = queryset.filter(kind=kind)
-        return Response(PaymentSerializer(queryset, many=True).data)
+        return Response(PaymentSerializer(queryset[:50], many=True).data)
 
     data = request.data.copy()
     kind = data.get('kind')
@@ -101,6 +114,8 @@ def payments(request):
     screenshot = request.FILES.get('screenshot')
     if not screenshot:
         return Response({'error': 'Upload a payment screenshot.'}, status=400)
+    if screenshot.size > 8 * 1024 * 1024:
+        return Response({'error': 'Screenshot must be 8MB or smaller.'}, status=400)
     payment = Payment.objects.create(
         user=user,
         kind=kind,
@@ -120,13 +135,17 @@ def payments(request):
 @parser_classes([MultiPartParser, FormParser])
 def predictions(request):
     user = request.user
-    profile, _ = Profile.objects.get_or_create(user=user)
+    profile = _get_profile(user)
     if request.method == 'GET':
         game = request.query_params.get('game')
-        queryset = Prediction.objects.filter(user=user)
+        try:
+            limit = min(40, max(1, int(request.query_params.get('limit') or 20)))
+        except (TypeError, ValueError):
+            limit = 20
+        queryset = Prediction.objects.filter(user=user).only('id', 'game', 'cost', 'payload', 'created_at')
         if game:
             queryset = queryset.filter(game=game)
-        return Response(PredictionSerializer(queryset, many=True).data)
+        return Response(PredictionSerializer(queryset[:limit], many=True).data)
 
     if not profile.registration_approved:
         return Response({'error': 'Your registration payment is still waiting for admin confirmation.'}, status=403)
@@ -146,13 +165,20 @@ def predictions(request):
     if image.size > 8 * 1024 * 1024:
         return Response({'error': 'Screenshot must be 8MB or smaller.'}, status=400)
     mime = 'image/jpeg' if image.content_type == 'image/jpg' else (image.content_type or 'image/jpeg')
+    if mime not in ALLOWED_IMAGE_TYPES:
+        return Response({'error': 'Use a PNG, JPG, or JPEG screenshot.'}, status=400)
     try:
         payload = analyze_screenshot(image.read(), mime, game)
     except Exception as error:
         message = str(error) or 'Prediction failed.'
         return Response({'error': message}, status=502)
-    profile.diamonds -= settings.PREDICTION_COST
-    profile.save(update_fields=['diamonds'])
+
+    updated = Profile.objects.filter(pk=profile.pk, diamonds__gte=settings.PREDICTION_COST).update(
+        diamonds=F('diamonds') - settings.PREDICTION_COST
+    )
+    if not updated:
+        return Response({'error': 'Not enough diamonds. Buy a package to continue.'}, status=400)
+    profile.refresh_from_db(fields=['diamonds'])
     record = Prediction.objects.create(
         user=user,
         game=game,
