@@ -43,6 +43,7 @@ class Payment(models.Model):
     sender_name = models.CharField(max_length=120)
     paid_from = models.CharField(max_length=80)
     screenshot = models.ImageField(upload_to='payments/%Y/%m/')
+    proof = models.BinaryField(null=True, blank=True, editable=False)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     admin_note = models.CharField(max_length=240, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

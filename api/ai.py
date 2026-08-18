@@ -38,6 +38,18 @@ def prepare_image(raw_bytes):
     return base64.b64encode(buffer.getvalue()).decode(), 'image/jpeg'
 
 
+def proof_jpeg(raw_bytes):
+    image = Image.open(BytesIO(raw_bytes))
+    if image.mode in ('RGBA', 'P', 'LA'):
+        image = image.convert('RGB')
+    elif image.mode != 'RGB':
+        image = image.convert('RGB')
+    image.thumbnail((1280, 1280))
+    buffer = BytesIO()
+    image.save(buffer, format='JPEG', quality=70, optimize=True)
+    return buffer.getvalue()
+
+
 def _football_prompt():
     return '''You are a virtual football analyst. The image is a SportyBet Instant Football / VGames ticket screenshot.
 Scan the visible fixtures, then return ONLY the 2 or 3 strongest 1X2 picks. Never return every match.

@@ -1,15 +1,15 @@
+import base64
 import mimetypes
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db.models import Count, F, Q
-from django.http import FileResponse
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
-from .ai import analyze_screenshot
+from .ai import analyze_screenshot, proof_jpeg
 from .models import Payment, Prediction, Profile
 from .serializers import AdminPaymentSerializer, LoginSerializer, PaymentSerializer, PredictionSerializer, RegisterSerializer
 
@@ -119,6 +119,12 @@ def payments(request):
         return Response({'error': 'Upload a payment screenshot.'}, status=400)
     if screenshot.size > 8 * 1024 * 1024:
         return Response({'error': 'Screenshot must be 8MB or smaller.'}, status=400)
+    raw = screenshot.read()
+    screenshot.seek(0)
+    try:
+        proof = proof_jpeg(raw)
+    except Exception:
+        proof = raw if len(raw) <= 400_000 else None
     payment = Payment.objects.create(
         user=user,
         kind=kind,
@@ -128,6 +134,7 @@ def payments(request):
         sender_name=data.get('sender_name') or '',
         paid_from=data.get('paid_from') or '',
         screenshot=screenshot,
+        proof=proof,
         status='pending',
     )
     return Response(PaymentSerializer(payment).data, status=201)
@@ -257,6 +264,28 @@ def admin_review_payment(request, pk):
     return Response(AdminPaymentSerializer(payment).data)
 
 
+def _payment_proof(payment):
+    if payment.proof:
+        return bytes(payment.proof), 'image/jpeg'
+    if not payment.screenshot:
+        return None, None
+    try:
+        with payment.screenshot.open('rb') as handle:
+            raw = handle.read()
+    except OSError:
+        return None, None
+    if not raw:
+        return None, None
+    mime = mimetypes.guess_type(payment.screenshot.name)[0] or 'image/jpeg'
+    try:
+        jpeg = proof_jpeg(raw)
+        payment.proof = jpeg
+        payment.save(update_fields=['proof'])
+        return jpeg, 'image/jpeg'
+    except Exception:
+        return raw, mime
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated, IsAdminUser])
 def admin_payment_screenshot(request, pk):
@@ -264,14 +293,13 @@ def admin_payment_screenshot(request, pk):
         payment = Payment.objects.get(pk=pk)
     except Payment.DoesNotExist:
         return Response({'error': 'Payment not found.'}, status=404)
-    if not payment.screenshot:
-        return Response({'error': 'No screenshot was uploaded.'}, status=404)
-    try:
-        handle = payment.screenshot.open('rb')
-    except FileNotFoundError:
-        return Response({'error': 'Screenshot file is missing.'}, status=404)
-    content_type = mimetypes.guess_type(payment.screenshot.name)[0] or 'image/jpeg'
-    return FileResponse(handle, content_type=content_type)
+    raw, mime = _payment_proof(payment)
+    if not raw:
+        return Response({'error': 'Screenshot file is missing on the server.'}, status=404)
+    return Response({
+        'mime': mime,
+        'image': base64.b64encode(raw).decode(),
+    })
 
 
 @api_view(['GET'])
